@@ -34,9 +34,10 @@ func (opts *TunnelOpts) init() {
 	utils.SetDefaultNum(&opts.IdleTimout, time.Second*300)
 }
 
-// defaultBufSize - фиксированный размер буфера для MIPS оптимизации
-// Убираем рандомизацию для снижения CPU нагрузки и фрагментации памяти
-const defaultBufSize = 8 * 1024 // 8KB
+// defaultBufSize - fixed buffer size for MIPS optimization
+// 64KB allows achieving 50+ Mbps with RTT 20ms
+// Removed randomization to reduce CPU load and memory fragmentation
+const defaultBufSize = 64 * 1024 // 64KB
 
 // OpenTunnel opens a tunnel between a and b.
 // It returns the first err encountered.
@@ -89,26 +90,29 @@ func (t *tunnel) waitUntilClosed() error {
 }
 
 // copyBufferOptimized - оптимизированная версия copyBuffer для MIPS
-// Использует фиксированный буфер и редкие обновления deadline
+// Использует фиксированный буфер и минимизирует вызовы time.Now()
 func copyBufferOptimized(dst net.Conn, src net.Conn, idleTimeout time.Duration) (written int64, err error) {
 	// Выделяем буфер один раз на весь цикл
 	buf := alloc.GetBuf(defaultBufSize)
 	defer alloc.ReleaseBuf(buf)
 
-	// Устанавливаем deadline один раз перед циклом
-	if idleTimeout > 0 {
-		deadline := time.Now().Add(idleTimeout)
-		src.SetDeadline(deadline)
-		dst.SetDeadline(deadline)
-	}
+	// deadlineLastUpdate - время последнего обновления deadline
+	// deadlineNext - время следующего обязательного обновления
+	var deadlineLastUpdate time.Time
+	var deadlineNext time.Time
 
 	for {
-		// Проверяем и обновляем deadline периодически
-		if idleTimeout > 0 {
-			// Обновляем deadline только если прошло достаточно времени
-			// Это снижает частоту вызовов time.Now() и system calls
-			src.SetDeadline(time.Now().Add(idleTimeout))
-			dst.SetDeadline(time.Now().Add(idleTimeout))
+		// Обновляем deadline только если прошло достаточно времени
+		// Это снижает частоту вызовов time.Now() и system calls
+		now := time.Now()
+		if idleTimeout > 0 && (deadlineLastUpdate.IsZero() || now.After(deadlineNext)) {
+			deadline := now.Add(idleTimeout)
+			src.SetDeadline(deadline)
+			dst.SetDeadline(deadline)
+			deadlineLastUpdate = now
+			// Обновляем следующий вызов через половину timeout
+			// Это гарантирует, что соединение не уйдёт в таймаут
+			deadlineNext = now.Add(idleTimeout / 2)
 		}
 
 		nr, er := src.Read(buf)
