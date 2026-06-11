@@ -1,132 +1,133 @@
 # simple-tls
 
-简单易用的 TCP 连接转发器。可为原始数据流加一层 TLS。支持通过 gRPC 传输。
+Simple and easy-to-use TCP connection forwarder. Adds a TLS layer to raw data streams. Supports gRPC transport.
 
-**Optimized for MIPS/ARM routers (Keenetic, etc.) - см. [MIPS_OPTIMIZATION.md](MIPS_OPTIMIZATION.md)**
+**Optimized for MIPS/ARM routers (Keenetic, etc.) - see [MIPS_OPTIMIZATION.md](MIPS_OPTIMIZATION.md)**
 
 ---
 
-## Доступные версии (build/)
+## Available Builds (build/)
 
-| Платформа | Файл | Размер |
-|-----------|------|--------|
+| Platform | File | Size |
+|----------|------|------|
 | **Linux ARM64** | `simple-tls-linux-arm64` | 10.44 MB |
 | **Linux AMD64** | `simple-tls-linux-amd64` | 11.11 MB |
 | **Linux MIPS LE** | `simple-tls-linux-mipsle-softfloat` | 12.06 MB |
 | **Windows AMD64** | `simple-tls-windows-amd64.exe` | 11.44 MB |
 | **Windows ARM64** | `simple-tls-windows-arm64.exe` | 10.51 MB |
 
-## 参数
+## Arguments
 
 ```text
-      客户端监听地址               服务端监听地址
+      Client listen address        Server listen address
            |                            |
-|客户端|-->|simple-tls 客户端|--TLS1.3-->|simple-tls 服务端|-->|最终目的地|
+|Client|-->|simple-tls client|--TLS1.3-->|simple-tls server|-->|Destination|
                                         |                     |   
-                                   客户端目的地地址     服务端目的地地址  
+                                   Client destination   Server destination  
 
-# 通用参数
+# Common arguments
   -b string
-      [Host:Port] (必需) 监听地址。
+      [Host:Port] (required) Listen address.
   -d string
-      [Host:Port] (必需) 目的地地址。
+      [Host:Port] (required) Destination address.
   -grpc
-      使用 gRPC 协议。客户端和服务端需一致。
+      Use gRPC protocol. Client and server must match.
   -grpc-path string
-      (可选) gRPC 服务路径。客户端和服务端需一致。
+      (optional) gRPC service name. Client and server must match.
 
-# 客户端参数
+# Client arguments
 # e.g. simple-tls -b 127.0.0.1:1080 -d your_server_ip:1080 -n your.server.name
 
   -n string
-      服务器证书名。用于验证服务端的证书的合法性。也用作 SNI。
+      Server name. Used to verify server certificate and as SNI.
   -no-verify
-      客户端将不会验证服务端的证书的合法性。(证书链验证)
+      Client will not verify the server's certificate chain.
   -ca string
-      用于验证服务端的证书的 CA 证书文件。(默认使用系统证书池)
+      CA certificate file for server verification. (defaults to system pool)
   -cert-hash string
-      服务器证书的 hash。(服务端证书锁定)
-      tips: 使用 -hash-cert 命令可以生成证书的 hash
+      Server certificate hash (certificate pinning).
+      tips: use -hash-cert command to generate certificate hash
 
-# 服务端参数
+# Server arguments
 # e.g. simple-tls -b :1080 -d 127.0.0.1:12345 -s -key /path/to/your/key -cert /path/to/your/cert
-# 证书格式必须是 PEM (base64) 。
-# -cert 和 -key 可以同时留空，会在内存中生成一个临时证书。证书的域名默认随机，但也可以取自 `-n` 参数。
+# Certificate format must be PEM (base64).
+# -cert and -key can be left empty, a temporary certificate will be generated in memory.
+# Certificate domain defaults to random, but can be taken from `-n` parameter.
 # e.g. simple-tls -b :1080 -d 127.0.0.1:12345 -s -n my.test.domain
 
   -s    
-      (必需) 以服务端运行。
+      (required) Run as server.
   -cert string
-      证书路径。
+      Certificate path.
   -key string
-      密钥路径。
+      Key path.
 
-# 其他通用参数
+# Other common arguments
 
   -t int
-      连接空闲超时，单位秒 (默认300)。
+      Connection idle timeout in seconds (default 300).
   -outbound-buf int
-      设置出站 tcp rw socket buf。
+      Set outbound TCP rw socket buffer.
   -inbound-buf    
-      设置入站 tcp rw socket buf。
+      Set inbound TCP rw socket buffer.
 
-# 命令
+# Commands
 
   -gen-cert
-      生成一个密钥长度为 256 的 ECC 证书到当前目录。
-      证书的 dns name 可以用 `-n` 设定。默认是随机字符串。
-      可以用 `-template` 指定模板证书。除密钥等关键参数外，其他参数都会从模板证书复制。
-      可以用 `-cert` 和 `-key` 指定证书输出位置。(默认当前目录且文件名是证书的 dns name)
+      Generate an ECC certificate with 256-bit key to current directory.
+      Certificate DNS name can be set with `-n`. Default is random string.
+      Can use `-template` to specify a template certificate. All parameters except key will be copied from template.
+      Can use `-cert` and `-key` to specify output paths. (default: current directory, filename is DNS name)
       e.g. simple-tls -gen-cert -n my.domain
-      会生成证书 my.domain.cert 和密钥 my.domain.key 两个文件到当前目录。
+      Will generate my.domain.cert and my.domain.key files in current directory.
   -hash-cert
-      显示证书的 hash 值。(用于客户端的 -cert-hash)
+      Display certificate hash. (for client's -cert-hash)
       e.g. simple-tls -hash-cert ./my.cert
   -v
-      显示目前程序版本
+      Display program version
 ```
 
-## 服务端无合法证书时如何快速使用 
+## Quick Start Without Valid Certificate
 
-服务端使用临时证书，客户端不做任何验证。下层连接有安全措施时可以使用该方案。
+Server uses a temporary certificate, client does not verify. Use this when the underlying connection has security measures.
 
 ```shell
-# 服务端的 -cert 和 -key 同时留空，会在内存生成一个临时证书。
+# Server: leave -cert and -key empty, generates a temporary certificate in memory.
 simple-tls -b :1080 -d 127.0.0.1:12345 -s -n my.cert.domain
-# 客户端禁用证书链验证。
+# Client: disable certificate chain verification.
 simple-tls -b :1080 -d your.server.address:1080 -n my.cert.domain -no-verify
 ```
 
-服务端使用固定证书，客户端使用 hash 验证服务端证书 (证书锁定)。
+Server uses a fixed certificate, client uses hash verification (certificate pinning).
 
 ```shell
-# 服务端生成一个证书。
+# Server: generate a certificate.
 simple-tls -gen-cert -n my.cert.domain
-# 然后显示证书的 hash。e.g. 8910fe28d2fb40398a...
+# Then display the certificate hash. e.g. 8910fe28d2fb40398a...
 simple-tls -hash-cert ./my.cert.domain.cert
-# 使用这个证书启动服务端
+# Start server with this certificate
 simple-tls -b :1080 -d 127.0.0.1:12345 -s -key ./my.cert.domain.key -cert ./my.cert.domain.cert
-# 客户端禁用证书链验证但启用证书 hash 验证。
+# Client: disable certificate chain verification but enable hash verification.
 simple-tls -b :1080 -d your.server.address:1080 -n my.cert.domain -no-verify -cert-hash 8910fe28d2fb40398a...
 ```
 
-## 作为 SIP003 插件使用
+## Using as SIP003 Plugin
 
-支持 shadowsocks 的 [SIP003](https://shadowsocks.org/en/wiki/Plugin.html) 插件协议。shadowsocks 主程序会自动设定监听地址 `-b` 和目的地地址 `-d`。
+Supports Shadowsocks [SIP003](https://shadowsocks.org/en/wiki/Plugin.html) plugin protocol. Shadowsocks main program automatically sets listen address `-b` and destination address `-d`.
 
-以 [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust) 为例:
+Example with [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust):
 
 ```shell
 ssserver -c config.json --plugin simple-tls --plugin-opts "s;key=/path/to/your/key;cert=/path/to/your/cert"
 sslocal -c config.json --plugin simple-tls --plugin-opts "n=your.server.certificates.dnsname"
 ```
 
-### Android SIP003 插件
+### Android SIP003 Plugin
 
-simple-tls-android 是 [shadowsocks-android](https://github.com/shadowsocks/shadowsocks-android) 的带 GUI 的插件。目前随 simple-tls 一起发布。可从 release 界面下载全平台通用的 apk。
+simple-tls-android is a GUI plugin for [shadowsocks-android](https://github.com/shadowsocks/shadowsocks-android). It is released together with simple-tls. You can download the universal APK from the release page.
 
-simple-tls-android 的源代码在 [这里](https://github.com/IrineSistiana/simple-tls-android) 。
+simple-tls-android source code is [here](https://github.com/IrineSistiana/simple-tls-android).
 
-### Beta 版本
+### Beta Version
 
-simple-tls 目前不保证版本之间的兼容性。
+simple-tls does not guarantee compatibility between versions at this time.
