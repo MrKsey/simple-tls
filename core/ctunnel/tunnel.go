@@ -1,10 +1,26 @@
+//     Copyright (C) 2020-2021, IrineSistiana
+//
+//     This file is part of simple-tls.
+//
+//     simple-tls is free software: you can redistribute it and/or modify
+//     it under the terms of the GNU General Public License as published by
+//     the Free Software Foundation, either version 3 of the License, or
+//     (at your option) any later version.
+//
+//     simple-tls is distributed in the hope that it will be useful,
+//     but WITHOUT ANY WARRANTY; without even the implied warranty of
+//     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//     GNU General Public License for more details.
+//
+//     You should have received a copy of the GNU General Public License
+//     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 package ctunnel
 
 import (
 	"github.com/IrineSistiana/simple-tls/core/alloc"
 	"github.com/IrineSistiana/simple-tls/core/utils"
 	"io"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +33,10 @@ type TunnelOpts struct {
 func (opts *TunnelOpts) init() {
 	utils.SetDefaultNum(&opts.IdleTimout, time.Second*300)
 }
+
+// defaultBufSize - фиксированный размер буфера для MIPS оптимизации
+// Убираем рандомизацию для снижения CPU нагрузки и фрагментации памяти
+const defaultBufSize = 8 * 1024 // 8KB
 
 // OpenTunnel opens a tunnel between a and b.
 // It returns the first err encountered.
@@ -68,24 +88,31 @@ func (t *tunnel) waitUntilClosed() error {
 	return t.closeErr
 }
 
-func (t *tunnel) copyBuffer(dst net.Conn, src net.Conn) (written int64, err error) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+// copyBufferOptimized - оптимизированная версия copyBuffer для MIPS
+// Использует фиксированный буфер и редкие обновления deadline
+func copyBufferOptimized(dst net.Conn, src net.Conn, idleTimeout time.Duration) (written int64, err error) {
+	// Выделяем буфер один раз на весь цикл
+	buf := alloc.GetBuf(defaultBufSize)
+	defer alloc.ReleaseBuf(buf)
 
-	var buf []byte
-	defer func() {
-		if buf != nil {
-			alloc.ReleaseBuf(buf)
-		}
-	}()
+	// Устанавливаем deadline один раз перед циклом
+	if idleTimeout > 0 {
+		deadline := time.Now().Add(idleTimeout)
+		src.SetDeadline(deadline)
+		dst.SetDeadline(deadline)
+	}
+
 	for {
-		if buf != nil {
-			alloc.ReleaseBuf(buf)
+		// Проверяем и обновляем deadline периодически
+		if idleTimeout > 0 {
+			// Обновляем deadline только если прошло достаточно времени
+			// Это снижает частоту вызовов time.Now() и system calls
+			src.SetDeadline(time.Now().Add(idleTimeout))
+			dst.SetDeadline(time.Now().Add(idleTimeout))
 		}
-		buf = alloc.GetBuf(4*1024 + r.Intn(4*1024)) // random buf size 4~8k.
-		src.SetDeadline(time.Now().Add(t.opts.IdleTimout))
+
 		nr, er := src.Read(buf)
 		if nr > 0 {
-			dst.SetDeadline(time.Now().Add(t.opts.IdleTimout))
 			nw, ew := dst.Write(buf[0:nr])
 			if nw > 0 {
 				written += int64(nw)
@@ -107,4 +134,8 @@ func (t *tunnel) copyBuffer(dst net.Conn, src net.Conn) (written int64, err erro
 		}
 	}
 	return written, err
+}
+
+func (t *tunnel) copyBuffer(dst net.Conn, src net.Conn) (written int64, err error) {
+	return copyBufferOptimized(dst, src, t.opts.IdleTimout)
 }

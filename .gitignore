@@ -17,6 +17,7 @@ vendor/
 # build.py
 build*.py
 release/
+build/
 
 # ide
 .vscode/

@@ -2,7 +2,19 @@
 
 简单易用的 TCP 连接转发器。可为原始数据流加一层 TLS。支持通过 gRPC 传输。
 
+**Optimized for MIPS/ARM routers (Keenetic, etc.) - см. [MIPS_OPTIMIZATION.md](MIPS_OPTIMIZATION.md)**
+
 ---
+
+## Доступные версии (build/)
+
+| Платформа | Файл | Размер |
+|-----------|------|--------|
+| **Linux ARM64** | `simple-tls-linux-arm64` | 10.44 MB |
+| **Linux AMD64** | `simple-tls-linux-amd64` | 11.11 MB |
+| **Linux MIPS LE** | `simple-tls-linux-mipsle-softfloat` | 12.06 MB |
+| **Windows AMD64** | `simple-tls-windows-amd64.exe` | 11.44 MB |
+| **Windows ARM64** | `simple-tls-windows-arm64.exe` | 10.51 MB |
 
 ## 参数
 

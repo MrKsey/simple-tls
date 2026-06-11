@@ -2,6 +2,9 @@ module github.com/IrineSistiana/simple-tls
 
 go 1.18
 
+// Примечание для сборки под MIPS без FPU:
+// GOOS=linux GOARCH=mips GOMIPS=softfloat go build -o simple-tls
+
 require (
 	github.com/stretchr/testify v1.8.0
 	go.uber.org/zap v1.23.0
