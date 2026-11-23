@@ -89,8 +89,8 @@ The binaries are statically linked and do not require a system libc or OpenSSL.
   -gen-cert
       Generate an ECC certificate with a 256-bit key in the current directory.
       Certificate DNS name can be set with -n. Default is a random string.
-      Can use -template to specify a template certificate. All parameters
-      except the key will be copied from the template.
+      Can use -template to specify a template certificate. DNS names, IP SANs,
+      common name and validity start are copied from the template.
       Can use -cert and -key to specify output paths.
       e.g. simple-tls -gen-cert -n my.domain
       Will generate my.domain.cert and my.domain.key files.

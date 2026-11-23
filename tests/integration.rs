@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 const DATA_SIZE: usize = 512 * 1024;
-const CONNECTIONS: usize = 16;
+const CONNECTIONS: usize = 64;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn raw_and_grpc_tunnels() {
