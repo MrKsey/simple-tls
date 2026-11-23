@@ -1,24 +1,18 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Rust build output
+/target/
+**/*.rs.bk
 
-# Test binary, built with `go test -c`
-*.test
+# Local test output
+*.log
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
+# Generated certificates and keys
+*.cert
+*.key
 
-# Dependency directories (remove the comment below to include it)
-vendor/
-
-# build.py
-build*.py
-release/
-build/
-
-# ide
+# IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
