@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const RAW_BUF_SIZE: usize = 64 * 1024;
-pub const GRPC_BUF_SIZE: usize = 32 * 1024;
+pub const GRPC_BUF_SIZE: usize = 64 * 1024;
 
 /// Opens a bidirectional tunnel between `a` and `b`.
 ///

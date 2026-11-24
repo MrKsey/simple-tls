@@ -24,8 +24,8 @@ const MAX_MESSAGE_SIZE: usize = 128 * 1024;
 const MAX_STREAMS_PER_CONN: usize = 4;
 const CONN_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const GRPC_FRAME_OVERHEAD: usize = 16;
-const GRPC_WRITE_CHUNK: usize = 32 * 1024;
-const INITIAL_WINDOW_SIZE: u32 = 1024 * 1024;
+const GRPC_WRITE_CHUNK: usize = 64 * 1024;
+const INITIAL_WINDOW_SIZE: u32 = 4 * 1024 * 1024;
 const MAX_CONCURRENT_STREAMS: u32 = 64;
 
 #[derive(Debug, Clone)]
@@ -66,7 +66,7 @@ pub async fn serve_connection(
     let mut builder = h2::server::Builder::new();
     builder
         .initial_window_size(INITIAL_WINDOW_SIZE)
-        .initial_connection_window_size(INITIAL_WINDOW_SIZE)
+        .initial_connection_window_size(INITIAL_WINDOW_SIZE * 2)
         .max_concurrent_streams(MAX_CONCURRENT_STREAMS);
 
     let mut connection = builder.handshake(tls).await?;
@@ -445,7 +445,7 @@ impl GrpcPool {
         let mut builder = h2::client::Builder::new();
         builder
             .initial_window_size(INITIAL_WINDOW_SIZE)
-            .initial_connection_window_size(INITIAL_WINDOW_SIZE);
+            .initial_connection_window_size(INITIAL_WINDOW_SIZE * 2);
 
         let (send, connection) = builder
             .handshake(tls)
