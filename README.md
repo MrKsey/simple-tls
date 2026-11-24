@@ -31,7 +31,8 @@ SIP003 plugin protocol are compatible with the original.
 | Windows ARM64 | `simple-tls-windows-arm64.exe` |
 
 The Linux binaries are statically linked and do not require a system libc or
-OpenSSL.
+OpenSSL. Every release archive contains a single binary named `simple-tls`,
+regardless of the platform, so install scripts can use the same path everywhere.
 
 ## Arguments
 
