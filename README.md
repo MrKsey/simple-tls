@@ -47,6 +47,8 @@ each platform.
 # Common arguments
   -b string
       [Host:Port] (required) Listen address.
+      An empty host (":443") listens on all interfaces, IPv4 and IPv6,
+      like the original Go implementation. Use "0.0.0.0:443" for IPv4 only.
   -d string
       [Host:Port] (required) Destination address.
   -grpc

@@ -97,8 +97,7 @@ pub async fn serve(listener: TcpListener, opts: ClientOpts) -> Result<()> {
 }
 
 pub async fn bind(addr: &str) -> Result<TcpListener> {
-    let addr = net::normalize_bind_addr(addr);
-    TcpListener::bind(&addr)
+    net::bind_listener(addr)
         .await
         .with_context(|| format!("cannot bind {addr}"))
 }
