@@ -23,6 +23,7 @@ h2 = "0.4"
 hex = "0.4"
 http = "1"
 log = "0.4"
+portable-atomic = "1"
 rand = "0.8"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }

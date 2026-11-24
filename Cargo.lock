@@ -915,6 +915,7 @@ dependencies = [
  "hex",
  "http",
  "log",
+ "portable-atomic",
  "rand",
  "rcgen",
  "rustls",
