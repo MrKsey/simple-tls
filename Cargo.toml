@@ -1,6 +1,6 @@
 [package]
 name = "simple-tls"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Simple and easy-to-use TCP connection forwarder with TLS 1.3 and gRPC transports"
