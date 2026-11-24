@@ -16,7 +16,7 @@ SIP003 plugin protocol are compatible with the original.
 - Certificate pinning by SHA-256 of the certificate TBS part.
 - Custom CA, system CA store or bundled WebPKI roots.
 - SIP003 plugin support (Shadowsocks).
-- Static Linux builds (musl) for x86_64 and aarch64.
+- Static Linux builds (musl) for x86_64, aarch64, MIPS32 and MIPS32 LE.
 
 ## Prebuilt binaries
 
@@ -24,8 +24,14 @@ SIP003 plugin protocol are compatible with the original.
 |----------|------|
 | Linux x86_64 (static) | `simple-tls-linux-amd64` |
 | Linux aarch64 (static) | `simple-tls-linux-arm64` |
+| Linux MIPS32 big-endian (static, soft-float) | `simple-tls-linux-mips-softfloat` |
+| Linux MIPS32 little-endian (static, hard-float) | `simple-tls-linux-mipsle-float` |
+| Linux MIPS32 little-endian (static, soft-float) | `simple-tls-linux-mipsle-softfloat` |
+| Windows x86_64 | `simple-tls-windows-amd64.exe` |
+| Windows ARM64 | `simple-tls-windows-arm64.exe` |
 
-The binaries are statically linked and do not require a system libc or OpenSSL.
+The Linux binaries are statically linked and do not require a system libc or
+OpenSSL.
 
 ## Arguments
 
