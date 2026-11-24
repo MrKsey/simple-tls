@@ -4,11 +4,12 @@ use h2::client::SendRequest;
 use h2::{RecvStream, SendStream};
 use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, Uri};
 use rustls::pki_types::ServerName;
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
-use std::task::{Context as TaskContext, Poll};
+use std::task::{ready, Context as TaskContext, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
@@ -248,6 +249,25 @@ fn grpc_io_error(error: h2::Error) -> io::Error {
     io::Error::other(error)
 }
 
+/// Returns an error if the gRPC trailers carry a non-zero `grpc-status`.
+fn grpc_status_error(trailers: Option<&HeaderMap>) -> Option<io::Error> {
+    let trailers = trailers?;
+    let status = trailers.get("grpc-status")?.to_str().ok()?;
+    let status: i32 = status.parse().ok()?;
+    if status == 0 {
+        return None;
+    }
+
+    let message = trailers
+        .get("grpc-message")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown error");
+    log::debug!("grpc: stream closed with status {status}: {message}");
+    Some(io::Error::other(format!(
+        "grpc stream closed with status {status}: {message}"
+    )))
+}
+
 async fn read_grpc_message(
     recv: &mut RecvStream,
     read_buf: &mut BytesMut,
@@ -461,14 +481,12 @@ impl GrpcPool {
                 .context("failed to send grpc request")?
         };
 
-        let response = response_future.await.context("grpc request failed")?;
-        if response.status() != StatusCode::OK {
-            bail!("grpc server returned status {}", response.status());
-        }
-
-        let recv = response.into_body();
+        // Do not wait for the response headers here. grpc-go servers send them
+        // lazily, only once the first message arrives (or the handler returns),
+        // so blocking on the response before the tunnel can send data would
+        // deadlock against such servers.
         Ok(PooledGrpcStream {
-            inner: GrpcStream::new(recv, send),
+            inner: GrpcStream::new(response_future, send),
             conn: conn.clone(),
         })
     }
@@ -533,7 +551,8 @@ impl AsyncWrite for PooledGrpcStream {
 }
 
 struct GrpcStream {
-    recv: RecvStream,
+    response: Option<h2::client::ResponseFuture>,
+    recv: Option<RecvStream>,
     send: SendStream<Bytes>,
     read_buf: BytesMut,
     current: Bytes,
@@ -541,13 +560,41 @@ struct GrpcStream {
 }
 
 impl GrpcStream {
-    fn new(recv: RecvStream, send: SendStream<Bytes>) -> Self {
+    fn new(response: h2::client::ResponseFuture, send: SendStream<Bytes>) -> Self {
         Self {
-            recv,
+            response: Some(response),
+            recv: None,
             send,
             read_buf: BytesMut::new(),
             current: Bytes::new(),
             eof: false,
+        }
+    }
+
+    fn poll_response(&mut self, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        let Some(response) = &mut self.response else {
+            return Poll::Ready(Ok(()));
+        };
+
+        match Pin::new(response).poll(cx) {
+            Poll::Ready(Ok(response)) => {
+                self.response = None;
+                if response.status() != StatusCode::OK {
+                    return Poll::Ready(Err(io::Error::other(format!(
+                        "grpc server returned status {}",
+                        response.status()
+                    ))));
+                }
+                self.recv = Some(response.into_body());
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(error)) => {
+                self.response = None;
+                Poll::Ready(Err(io::Error::other(format!(
+                    "grpc request failed: {error}"
+                ))))
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -587,18 +634,30 @@ impl AsyncRead for GrpcStream {
                 return Poll::Ready(Ok(()));
             }
 
-            match this.recv.poll_data(cx) {
+            ready!(this.poll_response(cx))?;
+            let Some(recv) = this.recv.as_mut() else {
+                return Poll::Ready(Err(io::Error::other("grpc stream is not ready")));
+            };
+
+            match recv.poll_data(cx) {
                 Poll::Ready(Some(Ok(chunk))) => {
                     let size = chunk.len();
                     this.read_buf.extend_from_slice(&chunk);
-                    if let Err(error) = this.recv.flow_control().release_capacity(size) {
+                    if let Err(error) = recv.flow_control().release_capacity(size) {
                         return Poll::Ready(Err(grpc_io_error(error)));
                     }
                 }
                 Poll::Ready(Some(Err(error))) => return Poll::Ready(Err(grpc_io_error(error))),
-                Poll::Ready(None) => {
-                    this.eof = true;
-                }
+                Poll::Ready(None) => match recv.poll_trailers(cx) {
+                    Poll::Ready(Ok(trailers)) => {
+                        if let Some(status) = grpc_status_error(trailers.as_ref()) {
+                            return Poll::Ready(Err(status));
+                        }
+                        this.eof = true;
+                    }
+                    Poll::Ready(Err(error)) => return Poll::Ready(Err(grpc_io_error(error))),
+                    Poll::Pending => return Poll::Pending,
+                },
                 Poll::Pending => return Poll::Pending,
             }
         }
