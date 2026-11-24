@@ -1,5 +1,6 @@
 use ::time::{Duration, OffsetDateTime};
 use anyhow::{anyhow, bail, Context, Result};
+use base64::Engine;
 use rand::RngCore;
 use rcgen::{
     CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
@@ -155,6 +156,247 @@ fn ip_from_octets(bytes: &[u8]) -> Option<IpAddr> {
         }
         _ => None,
     }
+}
+
+/// Describes the private key found in a PEM file for diagnostics.
+///
+/// rustls' `ring` provider only supports RSA 2048-4096, ECDSA P-256/P-384 and
+/// Ed25519. Its error for anything else is a bare "failed to parse private key
+/// as RSA, ECDSA, or EdDSA", which does not say what the file actually holds.
+pub fn describe_private_key(pem: &[u8]) -> Option<String> {
+    let (label, der) = pem_block(pem)?;
+    let (tag, body, _) = der_tlv(&der)?;
+    if tag != 0x30 {
+        return Some(format!("{label} block"));
+    }
+
+    match label.as_str() {
+        "EC PRIVATE KEY" => {
+            let curve = sec1_curve(body)?;
+            Some(format!(
+                "{label}, {}",
+                curve_description(
+                    &curve,
+                    matches!(curve.as_str(), "1.2.840.10045.3.1.7" | "1.3.132.0.34")
+                )
+            ))
+        }
+        "RSA PRIVATE KEY" => {
+            let bits = rsa_bits(body)?;
+            Some(format!("{label}, {bits}-bit RSA{}", rsa_range_note(bits)))
+        }
+        "PRIVATE KEY" => {
+            let (algorithm, curve, key_der) = pkcs8_parts(body)?;
+            let name = algorithm_name(&algorithm);
+            match curve {
+                Some(curve) => Some(format!(
+                    "{label} (PKCS#8), {name}, {}",
+                    curve_description(
+                        &curve,
+                        matches!(curve.as_str(), "1.2.840.10045.3.1.7" | "1.3.132.0.34")
+                    )
+                )),
+                None => {
+                    let rsa = if algorithm == "1.2.840.113549.1.1.1" {
+                        rsa_bits_from_der(key_der)
+                    } else {
+                        None
+                    };
+                    match rsa {
+                        Some(bits) => Some(format!(
+                            "{label} (PKCS#8), {name}, {bits}-bit RSA{}",
+                            rsa_range_note(bits)
+                        )),
+                        None => Some(format!("{label} (PKCS#8), {name}")),
+                    }
+                }
+            }
+        }
+        _ => Some(format!("{label} block")),
+    }
+}
+
+fn rsa_range_note(bits: usize) -> &'static str {
+    if (2048..=4096).contains(&bits) {
+        ""
+    } else {
+        " (ring requires 2048-4096 bits)"
+    }
+}
+
+fn curve_description(oid: &str, supported: bool) -> String {
+    let name = match oid {
+        "1.2.840.10045.3.1.7" => "P-256 (prime256v1)",
+        "1.3.132.0.34" => "P-384 (secp384r1)",
+        "1.3.132.0.35" => "P-521 (secp521r1)",
+        "1.3.132.0.10" => "secp256k1",
+        "1.3.132.0.33" => "P-224 (secp224r1)",
+        "1.2.840.10045.3.1.1" => "P-192 (prime192v1)",
+        _ => return format!("curve with OID {oid}"),
+    };
+    if supported {
+        format!("curve {name}, OID {oid}")
+    } else {
+        format!("curve {name}, OID {oid} (ring supports only P-256 and P-384)")
+    }
+}
+
+fn algorithm_name(oid: &str) -> String {
+    let name = match oid {
+        "1.2.840.10045.2.1" => "id-ecPublicKey",
+        "1.2.840.113549.1.1.1" => "rsaEncryption",
+        "1.2.840.113549.1.1.10" => "RSASSA-PSS",
+        "1.3.101.112" => "Ed25519",
+        "1.3.101.113" => "Ed448",
+        "1.2.840.10040.4.1" => "DSA",
+        _ => return format!("algorithm with OID {oid}"),
+    };
+    format!("{name} (OID {oid})")
+}
+
+fn pem_block(pem: &[u8]) -> Option<(String, Vec<u8>)> {
+    let text = std::str::from_utf8(pem).ok()?;
+    let begin = text.find("-----BEGIN ")?;
+    let label_start = begin + "-----BEGIN ".len();
+    let label_end = label_start + text[label_start..].find("-----")?;
+    let label = text[label_start..label_end].to_owned();
+    let body_start = label_end + "-----".len();
+    let end_marker = format!("-----END {label}-----");
+    let body_end = body_start + text[body_start..].find(&end_marker)?;
+    let body: String = text[body_start..body_end]
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    let der = base64::prelude::BASE64_STANDARD.decode(body).ok()?;
+    Some((label, der))
+}
+
+fn der_tlv(data: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *data.first()?;
+    let (length, length_bytes) = der_length(data.get(1..)?)?;
+    let start = 1 + length_bytes;
+    let end = start.checked_add(length)?;
+    Some((tag, data.get(start..end)?, data.get(end..)?))
+}
+
+fn der_length(data: &[u8]) -> Option<(usize, usize)> {
+    let first = *data.first()?;
+    if first < 0x80 {
+        return Some((usize::from(first), 1));
+    }
+    let count = usize::from(first & 0x7f);
+    if count == 0 || count > 4 {
+        return None;
+    }
+    let mut length = 0usize;
+    for byte in data.get(1..1 + count)? {
+        length = (length << 8) | usize::from(*byte);
+    }
+    Some((length, 1 + count))
+}
+
+fn decode_oid(bytes: &[u8]) -> Option<String> {
+    let first = u64::from(*bytes.first()?);
+    let mut parts = vec![first / 40, first % 40];
+    let mut value = 0u64;
+    for byte in bytes.get(1..)? {
+        value = (value << 7) | u64::from(byte & 0x7f);
+        if byte & 0x80 == 0 {
+            parts.push(value);
+            value = 0;
+        }
+    }
+    Some(
+        parts
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+            .join("."),
+    )
+}
+
+/// Extracts the curve OID from a SEC1 `ECPrivateKey` structure.
+fn sec1_curve(body: &[u8]) -> Option<String> {
+    let (tag, _, rest) = der_tlv(body)?;
+    if tag != 0x02 {
+        return None;
+    }
+    let (tag, _, rest) = der_tlv(rest)?;
+    if tag != 0x04 {
+        return None;
+    }
+    let (tag, value, _) = der_tlv(rest)?;
+    if tag != 0xa0 {
+        return None;
+    }
+    let (tag, oid, _) = der_tlv(value)?;
+    if tag != 0x06 {
+        return None;
+    }
+    decode_oid(oid)
+}
+
+/// Extracts the algorithm, the optional curve OID and the private key bytes
+/// from a PKCS#8 structure.
+fn pkcs8_parts(body: &[u8]) -> Option<(String, Option<String>, &[u8])> {
+    let (tag, _, rest) = der_tlv(body)?;
+    if tag != 0x02 {
+        return None;
+    }
+    let (tag, algorithm, rest) = der_tlv(rest)?;
+    if tag != 0x30 {
+        return None;
+    }
+    let (tag, key, _) = der_tlv(rest)?;
+    if tag != 0x04 {
+        return None;
+    }
+    let (tag, oid, parameters) = der_tlv(algorithm)?;
+    if tag != 0x06 {
+        return None;
+    }
+    let algorithm = decode_oid(oid)?;
+    let curve = if parameters.is_empty() {
+        None
+    } else {
+        match der_tlv(parameters) {
+            Some((0x06, value, _)) => decode_oid(value),
+            // RSA keys carry an explicit NULL here instead of a curve OID.
+            _ => None,
+        }
+    };
+    Some((algorithm, curve, key))
+}
+
+fn rsa_bits(body: &[u8]) -> Option<usize> {
+    let (tag, _, rest) = der_tlv(body)?;
+    if tag != 0x02 {
+        return None;
+    }
+    let (tag, modulus, _) = der_tlv(rest)?;
+    if tag != 0x02 {
+        return None;
+    }
+    let modulus = modulus
+        .iter()
+        .skip_while(|byte| **byte == 0)
+        .copied()
+        .collect::<Vec<_>>();
+    let leading = modulus
+        .first()
+        .map(|byte| 8 - byte.leading_zeros() as usize)
+        .unwrap_or(0);
+    Some(modulus.len().saturating_sub(1) * 8 + leading)
+}
+
+/// Like [`rsa_bits`], but for a complete PKCS#1 `RSAPrivateKey` DER blob,
+/// which is what a PKCS#8 `OCTET STRING` holds.
+fn rsa_bits_from_der(der: &[u8]) -> Option<usize> {
+    let (tag, body, _) = der_tlv(der)?;
+    if tag != 0x30 {
+        return None;
+    }
+    rsa_bits(body)
 }
 
 pub fn parse_pem_certs(data: &[u8]) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {

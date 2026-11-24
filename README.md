@@ -79,7 +79,9 @@ each platform.
   -cert string
       Certificate path.
   -key string
-      Key path.
+      Key path. Supported keys: RSA 2048-4096, ECDSA P-256/P-384, Ed25519,
+      in PKCS#1, SEC1 or PKCS#8 PEM form. Other keys (for example ECDSA P-521
+      or secp256k1) are rejected; regenerate the certificate with -gen-cert.
 
 # Other common arguments
 

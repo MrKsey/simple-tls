@@ -77,6 +77,7 @@ pub fn build_server_config(
     let key = rustls_pemfile::private_key(&mut Cursor::new(key_pem))
         .context("cannot parse private key")?
         .ok_or_else(|| anyhow!("no private key found"))?;
+    let key_description = cert::describe_private_key(key_pem);
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ServerConfig::builder_with_provider(provider)
@@ -85,7 +86,13 @@ pub fn build_server_config(
     let mut config = builder
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .context("cannot load x509 key pair")?;
+        .map_err(|error| match &key_description {
+            Some(description) => anyhow!(
+                "cannot load x509 key pair: {error} [key: {description}]; \
+                 supported keys: RSA 2048-4096, ECDSA P-256/P-384, Ed25519"
+            ),
+            None => anyhow!("cannot load x509 key pair: {error}"),
+        })?;
 
     if grpc {
         config.alpn_protocols = vec![b"h2".to_vec()];
