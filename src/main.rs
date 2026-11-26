@@ -27,6 +27,7 @@ fn run() -> Result<()> {
     }
 
     init_logger(args.debug);
+    raise_fd_limit();
 
     if args.show_version {
         println!(
@@ -119,6 +120,45 @@ fn init_logger(debug: bool) {
             .format_timestamp_millis()
             .try_init();
 }
+
+/// Raises the soft open file limit up to the hard limit.
+///
+/// A proxy keeps one descriptor per tunnel. Many systems (and Docker by
+/// default) start processes with a soft limit as low as 1024, which a busy
+/// server reaches quickly, so use whatever the hard limit allows.
+#[cfg(unix)]
+fn raise_fd_limit() {
+    const MAX_TARGET: libc::rlim_t = 1_048_576;
+
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit and setrlimit only read and write the given struct.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 {
+            return;
+        }
+        let target = limit.rlim_max.min(MAX_TARGET);
+        if limit.rlim_cur >= target {
+            return;
+        }
+        let raised = libc::rlimit {
+            rlim_cur: target,
+            rlim_max: limit.rlim_max,
+        };
+        if libc::setrlimit(libc::RLIMIT_NOFILE, &raised) == 0 {
+            log::debug!(
+                "raised the open file limit from {} to {}",
+                limit.rlim_cur,
+                target
+            );
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn raise_fd_limit() {}
 
 fn generate_cert(args: &Args) -> Result<()> {
     log::info!("generating PEM encoded key and cert");

@@ -333,9 +333,19 @@ struct PoolInner {
 }
 
 struct PooledConn {
-    send: Mutex<SendRequest<Bytes>>,
+    send: Mutex<Option<SendRequest<Bytes>>>,
     active: AtomicUsize,
     closed: AtomicBool,
+}
+
+impl PooledConn {
+    /// Drops the only `SendRequest` handle, which lets the h2 connection task
+    /// finish and close the socket. Without this the connection task keeps the
+    /// `PooledConn` alive and the socket leaks forever.
+    async fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let _ = self.send.lock().await.take();
+    }
 }
 
 impl GrpcPool {
@@ -365,7 +375,7 @@ impl GrpcPool {
             Ok(stream) => Ok(stream),
             Err(error) => {
                 conn.active.fetch_sub(1, Ordering::SeqCst);
-                conn.closed.store(true, Ordering::SeqCst);
+                conn.close().await;
                 Err(error)
             }
         }
@@ -400,7 +410,7 @@ impl GrpcPool {
 
         let (send, connection) = self.dial().await?;
         let conn = Arc::new(PooledConn {
-            send: Mutex::new(send),
+            send: Mutex::new(Some(send)),
             active: AtomicUsize::new(1),
             closed: AtomicBool::new(false),
         });
@@ -477,6 +487,9 @@ impl GrpcPool {
 
         let (response_future, send) = {
             let mut sender = conn.send.lock().await;
+            let Some(sender) = sender.as_mut() else {
+                bail!("grpc connection is closed");
+            };
             sender
                 .send_request(request, false)
                 .context("failed to send grpc request")?
@@ -506,7 +519,8 @@ async fn idle_monitor(inner: Weak<PoolInner>, conn: Arc<PooledConn>, idle_timeou
         let mut conns = inner.conns.lock().await;
         if conn.active.load(Ordering::Relaxed) == 0 {
             conns.retain(|item| !Arc::ptr_eq(item, &conn));
-            conn.closed.store(true, Ordering::SeqCst);
+            drop(conns);
+            conn.close().await;
             break;
         }
     }

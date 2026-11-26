@@ -31,7 +31,7 @@ pub async fn serve(listener: TcpListener, opts: ServerOpts) -> Result<()> {
     if opts.grpc {
         let routes = Arc::new(grpc::build_routes(&opts.dst, &opts.grpc_path)?);
         loop {
-            let (tcp, peer) = listener.accept().await?;
+            let (tcp, peer) = net::accept(&listener).await?;
             net::apply_socket_buf(&tcp, opts.inbound_buf);
             let acceptor = acceptor.clone();
             let routes = routes.clone();
@@ -59,7 +59,7 @@ pub async fn serve(listener: TcpListener, opts: ServerOpts) -> Result<()> {
         }
     } else {
         loop {
-            let (tcp, peer) = listener.accept().await?;
+            let (tcp, peer) = net::accept(&listener).await?;
             net::apply_socket_buf(&tcp, opts.inbound_buf);
             let acceptor = acceptor.clone();
             let dst = opts.dst.clone();

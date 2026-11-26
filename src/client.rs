@@ -41,7 +41,7 @@ pub async fn serve(listener: TcpListener, opts: ClientOpts) -> Result<()> {
         );
 
         loop {
-            let (local, peer) = listener.accept().await?;
+            let (local, peer) = net::accept(&listener).await?;
             net::apply_socket_buf(&local, opts.inbound_buf);
             let pool = pool.clone();
             let idle_timeout = opts.idle_timeout;
@@ -65,7 +65,7 @@ pub async fn serve(listener: TcpListener, opts: ClientOpts) -> Result<()> {
         let connector = TlsConnector::from(tls_config);
 
         loop {
-            let (local, peer) = listener.accept().await?;
+            let (local, peer) = net::accept(&listener).await?;
             net::apply_socket_buf(&local, opts.inbound_buf);
             let connector = connector.clone();
             let server_name = server_name.clone();
